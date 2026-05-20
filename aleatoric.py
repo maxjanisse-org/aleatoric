@@ -104,9 +104,8 @@ def main(args):
         data.append(wave)
 
         if args.bass:
-            n = y[0] / 2
-            t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4))
-
+            # Drop the octave of the current chord's base key by 2; divide the frequency by 4
+            n = y[0] / 4
             frequencies = np.piecewise(
                 t,
                 [
