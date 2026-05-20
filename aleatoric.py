@@ -105,16 +105,15 @@ def main(args):
 
         if args.bass:
             n = y[0] / 2
-            b = (60/args.tempo) * args.melody
-            t = np.linspace(0, b * 4, int(samplerate * b * 4))
+            t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4))
 
             frequencies = np.piecewise(
                 t,
                 [
-                    t < b,
-                    (t >= b) & (t < b * 2),
-                    (t >= b * 2) & (t < b * 3),
-                    t >= b * 3
+                    t < beat_duration,
+                    (t >= beat_duration) & (t < beat_duration * 2),
+                    (t >= beat_duration * 2) & (t < beat_duration * 3),
+                    t >= beat_duration * 3
                 ],
                 [n] * 4
             ) # type: ignore
