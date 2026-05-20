@@ -85,7 +85,7 @@ def main(args):
             continue
 
         chord_progression = chords_by_label[label]
-        t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4))
+        t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4), endpoint=False)
         y = [major_scale[y] for y in parse_progression(chord_progression)]
 
         frequencies = np.piecewise(
@@ -132,12 +132,15 @@ def main(args):
             wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
             bass.append(wave)
 
-    x = np.column_stack([ np.concatenate(d) for d in [melody, bass, harmony] if len(d) != 0])
+    x = [ np.concatenate(d) for d in [melody, bass, harmony, drums] if len(d) != 0]
+    t = np.zeros_like(x[0])
+    for y in x:
+        t += y.astype(np.float32)
+    x = t / 2.0
 
     if args.output is None:
         print("Playing music...")
         try:
-            #x = np.concatenate(data) #[np.concatenate(d) for d in data]
             sd.play(x, samplerate, loop=True, blocking=True)
             print("Playback: Loop complete")
         except KeyboardInterrupt:
