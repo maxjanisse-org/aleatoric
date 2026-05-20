@@ -98,7 +98,7 @@ def main(args):
             ],
             y
         ) # type: ignore
-        wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies) / samplerate)
+        wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
         melody.append(wave)
 
         if args.harmony:
@@ -113,7 +113,7 @@ def main(args):
                 ],
                 [n] * 4
             ) # type: ignore
-            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies) / samplerate)
+            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
             harmony.append(wave)
 
         if args.bass:
@@ -129,7 +129,7 @@ def main(args):
                 ],
                 [n] * 4
             ) # type: ignore
-            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies) / samplerate)
+            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
             bass.append(wave)
 
     x = np.column_stack([ np.concatenate(d) for d in [melody, bass, harmony] if len(d) != 0])
@@ -143,7 +143,7 @@ def main(args):
         except KeyboardInterrupt:
             print("Playback complete, exiting...")
     else:
-        print(f"Writing to file: {args.output}")
+        print(f"\nWriting to file: {args.output}")
         wav.write(args.output, samplerate, [])
 
 def tempo(value):
