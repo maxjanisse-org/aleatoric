@@ -60,8 +60,6 @@ def main(args):
         print(f"Tempo: {args.tempo} bpm")
         print(f"Output: {args.output if args.output is not None else "Audio Out"}")
         print(f"Generate Bass: {args.bass}")
-        if args.bass:
-            print(f"    Bass note: {args.key}{args.octave-2}")
         print(f"Generate Harmony: {args.harmony}")
         print(f"Generate Rhythm: {args.rhythm}")
         print(f"Generate Drums: {args.drums}")
