@@ -82,10 +82,15 @@ def main(args):
 
     beat_duration = (60/args.tempo) * args.melody
 
-    data = []
+    melody = []
     bass = []
+    harmony = []
+    is_chorus = False
     for label in song_struct:
-        if label == "/": continue
+        if label == "/": 
+            is_chorus = True
+            continue
+
         chord_progression = chords_by_label[label]
         t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4))
         y = [major_scale[y] for y in parse_progression(chord_progression)]
@@ -101,7 +106,22 @@ def main(args):
             y
         ) # type: ignore
         wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies) / samplerate)
-        data.append(wave)
+        melody.append(wave)
+
+        if args.harmony:
+            n = y[0] if is_chorus else 0
+            frequencies = np.piecewise(
+                t,
+                [
+                    t < beat_duration,
+                    (t >= beat_duration) & (t < beat_duration * 2),
+                    (t >= beat_duration * 2) & (t < beat_duration * 3),
+                    t >= beat_duration * 3
+                ],
+                [n] * 4
+            ) # type: ignore
+            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies) / samplerate)
+            harmony.append(wave)
 
         if args.bass:
             # Drop the octave of the current chord's base key by 2; divide the frequency by 4
@@ -119,7 +139,7 @@ def main(args):
             wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies) / samplerate)
             bass.append(wave)
 
-    x = np.column_stack([ np.concatenate(d) for d in [data, bass] if len(d) != 0])
+    x = np.column_stack([ np.concatenate(d) for d in [melody, bass, harmony] if len(d) != 0])
 
     if args.output is None:
         print("Playing music...")
