@@ -69,14 +69,9 @@ def main(args):
         print()
     
     samplerate = 48000
-    #freqs = [55 << i for i in range(args.octave + 1)]
-    #freq = note(freqs[-2], key_index)
 
     scale = [note(55*args.octave, i) for i in range(len(keys) + 1)]
-    x = dict(zip(keys, scale))
-    #print(x)
     major_scale = [scale[n] for n in [0, 2, 4, 5, 7, 9, 11]]
-    #print(major_scale)
 
     beat_duration = (60/args.tempo) * args.melody
 
