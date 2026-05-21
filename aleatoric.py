@@ -25,10 +25,15 @@ chord_loops = [
     "vi-IV-I-V"
 ]
 
-keys = ['A', 'B♭/A♯', 'B', 'C', 'D♭/C♯', 'D', 'E♭/D♯', 'E', 'F', 'G♭/F♯', 'G', 'A♭/G♯']
+notes = ['C', 'D♭/C♯', 'D', 'E♭/D♯', 'E', 'F', 'G♭/F♯', 'G', 'A♭/G♯', 'A', 'B♭/A♯', 'B']
 
-def note(base_freq, i): 
-    return base_freq * 2 ** (i/12)
+def midi_to_note(midi):
+    note_idx = midi % 12
+    octave = (midi // 12) - 1
+    freq = midi_to_freq(midi)
+    return (notes[note_idx], octave, freq)
+
+def midi_to_freq(midi): return 440 * (2 ** ((midi - 69) / 12))
 
 def parse_progression(progression):
     for p in progression.split('-'):
@@ -45,15 +50,15 @@ def main(args):
     song_struct = song_structs[random.randint(0, len(song_structs)-1)]
     chords = random.sample(chord_loops, k=4)
     chords_by_label = {c[0]: c[1] for c in zip(['A','B','C','D'], chords)}
-    key_index = random.randint(0, len(keys)-1)
+    key_midi = random.randint(45, 69)
 
     if args.key is None:
-        args.key = keys[key_index]
-    else:
-        key_index = keys.index(args.key)
+        args.key = key_midi
+
+    note, octave, _ = midi_to_note(args.key)
 
     if args.verbose:
-        print(f"Key: {args.key}{args.octave}")
+        print(f"Key: {note}{octave} ({args.key})")
         print(f"Structure: {song_struct}")
         for k,v in chords_by_label.items():
             print(f"    {k}: {v}")
@@ -70,7 +75,7 @@ def main(args):
     
     samplerate = 48000
 
-    scale = [note(55*args.octave, i) for i in range(len(keys) + 1)]
+    scale = [midi_to_freq(i) for i in range(args.key, args.key + 12)]
     major_scale = [scale[n] for n in [0, 2, 4, 5, 7, 9, 11]]
 
     beat_duration = (60/args.tempo) * args.melody
@@ -157,11 +162,11 @@ def tempo(value):
     except:
         raise argparse.ArgumentTypeError(f"Illegal value type provided; integer value expected.")
 
-def octave(value):
+def key(value):
     try:
         ivalue = int(value)
-        if 1 <= ivalue <= 8: return ivalue
-        raise ValueError(f"Illegal value for octave provided ({value}); value expected to be between 1 and 8.")
+        if 45 <= ivalue <= 127: return ivalue
+        raise ValueError(f"Illegal value for key provided ({value}); value expected to be between 45 and 127.")
     except:
             raise argparse.ArgumentTypeError(f"Illegal value type provided; integer value expected.")
 
@@ -177,8 +182,8 @@ if __name__ == "__main__":
         metavar="FILENAME.wav"
     )
     parser.add_argument(
-        "-k", "--key", choices=keys, 
-        help="set the key of the generated music. By default, this will be randomly selected."
+        "-k", "--key", type=key, 
+        help="set the key of the generated music in the form of a MIDI key. By default, this will be randomly selected."
     )
     parser.add_argument(
         "-t", "--tempo", type=tempo,
@@ -189,10 +194,6 @@ if __name__ == "__main__":
         help="By default, eighth-notes will be used."
     )
     # Extras
-    parser.add_argument(
-        "--octave", type=octave, default=3,
-        help="the octave of the base key. Value must be between 1 and 8. If `--bass` argument is used, then value must be between 3 and 8."
-    )
     parser.add_argument(
         "--bass", action="store_true",
         help="play the chord root as a whole note two octaves lower."
@@ -219,9 +220,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    if args.bass and args.octave < 3:
-        raise ValueError("Cannot generate bass track for octave's less than 3.")
 
     if args.tempo is None:
         args.tempo = random.randint(80, 160)
