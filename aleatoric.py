@@ -31,7 +31,7 @@ def midi_to_note(midi):
     note_idx = midi % 12
     octave = (midi // 12) - 1
     freq = midi_to_freq(midi)
-    return (notes[note_idx], octave, freq)
+    return (notes[note_idx], octave, freq, midi)
 
 def midi_to_freq(midi): return 440 * (2 ** ((midi - 69) / 12))
 
@@ -46,19 +46,35 @@ def parse_progression(progression):
             case 'vi': yield 5
             case _: raise ValueError(f"unexpected progression '{p}'")
 
+def generate_sawtooth(f, t, harmonics=50):    
+    sawtooth_fourier = np.zeros_like(t)
+
+    for k in range(1, harmonics + 1):
+        sawtooth_fourier += ((-1)**(k+1)) * (np.sin(2 * np.pi * k * f * t) / k)
+
+    sawtooth_fourier *= (2 / np.pi)
+    return sawtooth_fourier
+
+
 def main(args):
+    samplerate = 48000
     song_struct = song_structs[random.randint(0, len(song_structs)-1)]
     chords = random.sample(chord_loops, k=4)
     chords_by_label = {c[0]: c[1] for c in zip(['A','B','C','D'], chords)}
-    key_midi = random.randint(45, 69)
+
+    key_midi = random.randint(45, 69) # A3 to A4
+
+    beat_duration = (60/args.tempo) * args.melody
 
     if args.key is None:
         args.key = key_midi
 
-    note, octave, _ = midi_to_note(args.key)
+    note, octave, _, _ = midi_to_note(args.key)
+    major_scale_midi = [args.key + i for i in [0, 2, 4, 5, 7, 9, 11]]
 
     if args.verbose:
         print(f"Key: {note}{octave} ({args.key})")
+        print(f"Major Scale Notes: {[midi_to_note(i)[0] for i in major_scale_midi]}")
         print(f"Structure: {song_struct}")
         for k,v in chords_by_label.items():
             print(f"    {k}: {v}")
@@ -73,68 +89,57 @@ def main(args):
             print(f"MIDI Port: {args.midi_port}")
         print()
     
-    samplerate = 48000
+    major_scale = [midi_to_note(args.key + i) for i in [0, 2, 4, 5, 7, 9, 11]]
 
-    scale = [midi_to_freq(i) for i in range(args.key, args.key + 12)]
-    major_scale = [scale[n] for n in [0, 2, 4, 5, 7, 9, 11]]
-
-    beat_duration = (60/args.tempo) * args.melody
+    t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4), endpoint=False)
 
     melody = []
     bass = []
     harmony = []
+    drums = []
     is_chorus = False
     for label in song_struct:
         if label == "/": 
             is_chorus = True
             continue
 
-        chord_progression = chords_by_label[label]
-        t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4), endpoint=False)
-        y = [major_scale[y] for y in parse_progression(chord_progression)]
+        chord_scales = []
+        for i in chords_by_label[label].split('-'):
+            x = list(parse_progression(i))[0]
+            w = (x + 2) % len(major_scale_midi)
+            u = (x + 4) % len(major_scale_midi)
+            a = [midi_to_note(major_scale_midi[j]) for j in [x, w, u]]
+            chord_scales.append((i, a)) 
 
-        frequencies = np.piecewise(
-            t,
-            [
-                t < beat_duration,
-                (t >= beat_duration) & (t < beat_duration * 2),
-                (t >= beat_duration * 2) & (t < beat_duration * 3),
-                t >= beat_duration * 3
-            ],
-            y
-        ) # type: ignore
-        wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
+        y = []
+        for _, chord_scale in chord_scales:
+            s = random.choice(chord_scale) if random.random() < 0.8 else random.choice(major_scale)
+            y.append(s)
+
+        if args.verbose:
+            print(f"{label} Chord Scales: ")
+            for tempo, notes in chord_scales:
+                print(f"   {tempo}: {[note for note, _, _, _ in notes]}")
+            print(f"{label} Melody: {[n for n,_,_,_ in y]}")
+
+        wave = np.concatenate([generate_sawtooth(f, t) for _, _, f, _ in y])
         melody.append(wave)
 
+        #if args.drums:
+        #    wave = np.concatenate([generate_sawtooth(f, t) for f in [50]*4])
+        #    drums.append(wave)
+
         if args.harmony:
-            n = y[0] if is_chorus else 0
-            frequencies = np.piecewise(
-                t,
-                [
-                    t < beat_duration,
-                    (t >= beat_duration) & (t < beat_duration * 2),
-                    (t >= beat_duration * 2) & (t < beat_duration * 3),
-                    t >= beat_duration * 3
-                ],
-                [n] * 4
-            ) # type: ignore
-            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
+            n = [notes[0][2] for _, notes in chord_scales] if is_chorus else [0]*4
+            wave = np.concatenate([generate_sawtooth(f, t) for f in n])
             harmony.append(wave)
 
         if args.bass:
-            # Drop the octave of the current chord's base key by 2; divide the frequency by 4
-            n = y[0] / 4
-            frequencies = np.piecewise(
-                t,
-                [
-                    t < beat_duration,
-                    (t >= beat_duration) & (t < beat_duration * 2),
-                    (t >= beat_duration * 2) & (t < beat_duration * 3),
-                    t >= beat_duration * 3
-                ],
-                [n] * 4
-            ) # type: ignore
-            wave = signal.sawtooth(2 * np.pi * np.cumsum(frequencies * 2) / samplerate)
+            _, _, _, midi = y[0]
+            note, oct, n, midi = midi_to_note(midi - 24)
+            if args.verbose:
+                print(f"{label} Bass Note: {note}{oct} @ {n}Hz ({midi})")
+            wave = np.concatenate([generate_sawtooth(f, t) for f in [n]*4])
             bass.append(wave)
 
     x = [ np.concatenate(d) for d in [melody, bass, harmony, drums] if len(d) != 0]
@@ -147,11 +152,10 @@ def main(args):
         print("Playing music...")
         try:
             sd.play(x, samplerate, loop=True, blocking=True)
-            print("Playback: Loop complete")
         except KeyboardInterrupt:
-            print("Playback complete, exiting...")
+            print("\nPlayback complete, exiting...")
     else:
-        print(f"\nWriting to file: {args.output}")
+        print(f"Writing to file: {args.output}")
         wav.write(args.output, samplerate, [])
 
 def tempo(value):
@@ -190,7 +194,7 @@ if __name__ == "__main__":
         help="set the tempo of the generated music. Value must be between 80 and 160. By default, this will be randomly chosen."
     )
     parser.add_argument(
-        "-m", "--melody", type=float, default=0.5,
+        "-m", "--melody", type=float, default=0.125,
         help="By default, eighth-notes will be used."
     )
     # Extras
