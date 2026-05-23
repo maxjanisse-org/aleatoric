@@ -12,7 +12,7 @@ if [ ! -d "venv" ]; then
     echo -e "Activating Python environment..."
     source venv/bin/activate
     echo -e "Installing packages...\n"
-    pip install scipy sounddevice mido > /dev/null
+    pip install -r ./requirements.txt > /dev/null
 elif [[ -z "$VIRTUAL_ENV" ]]; then
     echo -e "Activating existing Python environment..."
     source venv/bin/activate
