@@ -5,6 +5,8 @@ import sounddevice as sd
 import mido
 import argparse
 import random
+import time
+import threading
 
 song_structs = [
     "AABB/CC", 
@@ -62,13 +64,17 @@ def main(args):
     chords = random.sample(chord_loops, k=4)
     chords_by_label = {c[0]: c[1] for c in zip(['A','B','C','D'], chords)}
 
-    key_midi = random.randint(45, 69) # A3 to A4
+    key_midi = random.randint(57, 69) # A3 to A4
 
     if args.key is None:
         args.key = key_midi
 
     note, octave, _, _ = midi_to_note(args.key)
     major_scale_midi = [args.key + i for i in [0, 2, 4, 5, 7, 9, 11]]
+
+    port = None
+    if args.midi:
+        port = mido.open_output(name=args.midi_device)
 
     if args.verbose:
         print(f"Key: {note}{octave} ({args.key})")
@@ -84,7 +90,7 @@ def main(args):
         print(f"Generate Drums: {args.drums}")
         print(f"MIDI Support: {args.midi}")
         if args.midi:
-            print(f"MIDI Port: {args.midi_port}")
+            print(f"    Device: '{args.midi_device}'")
         print()
     
     major_scale = [midi_to_note(i) for i in major_scale_midi]
@@ -97,11 +103,13 @@ def main(args):
     drums = []
     is_chorus = False
     m = args.melody if not args.rhythm else (1/(2**random.randint(0, 4)))
-    print(f"{m} notes")
+    print(f"Verse {m} notes")
     for label in song_struct:
         if label == "/": 
             is_chorus = True
-            if args.rhythm: m =  (1/(2**random.randint(0, 4))); print(f"{m} notes")
+            if args.rhythm: 
+                m =  (1/(2**random.randint(0, 4)))
+                print(f"Chorus {m} notes")
             continue
 
         t = np.linspace(0, beat_duration(m), int(samplerate * beat_duration(m)), endpoint=False)
@@ -146,20 +154,49 @@ def main(args):
             bass.append(wave)
 
     x = [ np.concatenate(d) for d in [melody, bass, harmony, drums] if len(d) != 0]
-    t = np.zeros_like(x[0])
-    for y in x:
-        t += y.astype(np.float32)
-    x = t / 2.0
 
-    if args.output is None:
-        print("Playing music...")
-        try:
-            sd.play(x, samplerate, loop=True, blocking=True)
-        except KeyboardInterrupt:
-            print("\nPlayback complete, exiting...")
+    if args.midi:
+        def j(notes, channel, sleep):
+            def k():
+                for n in notes:
+                    port.send(mido.Message("note_on", note=n, velocity=64, channel=channel))
+                    time.sleep(sleep)
+                    port.send(mido.Message("note_off", note=n, velocity=0, channel=channel))
+            return k
+
+        z = []
+        for c, notes in enumerate(x):
+            t = threading.Thread(target=j(notes, c, beat_duration(.125)))
+            z.append(t)
+
+        for u in z:
+            u.start()
+
+        for u in z:
+            u.join()
+            
+        port.send(mido.Message('control_change', channel=0, control=123, value=0))
+        port.close()
+        exit(0)
     else:
-        print(f"Writing to file: {args.output}")
-        wav.write(args.output, samplerate, [])
+        s = min([len(a) for a in x])
+        for a in x:
+            a.resize(s, refcheck=False)
+
+        t = np.zeros_like(x[0])
+        for y in x:
+            t += y.astype(np.float32)
+        x = t / 2.0
+
+        if args.output is None:
+            print("Playing music...")
+            try:
+                sd.play(x, samplerate, loop=True, blocking=True)
+            except KeyboardInterrupt:
+                print("\nPlayback complete, exiting...")
+        else:
+            print(f"Writing to file: {args.output}")
+            wav.write(args.output, samplerate, x)
 
 def tempo(value):
     try:
@@ -225,10 +262,23 @@ if __name__ == "__main__":
         "--midi-port", type=int,
         help="use this port number for connecting to the MIDI controller."
     )
+    parser.add_argument(
+        "--midi-devices", action="store_true",
+        help=""
+    )
 
     args = parser.parse_args()
 
     if args.tempo is None:
         args.tempo = random.randint(80, 160)
+
+    if args.midi_devices:
+        print("MIDI Output Devices:")
+        for i, a in enumerate(mido.get_output_names()):
+            print(f"    [{i+1}] {a}")
+        exit(0)
+
+    if args.midi and args.midi_port:
+        args.midi_device = mido.get_output_names()[args.midi_port-1]
 
     main(args)
