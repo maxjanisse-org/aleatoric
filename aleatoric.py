@@ -64,8 +64,6 @@ def main(args):
 
     key_midi = random.randint(45, 69) # A3 to A4
 
-    beat_duration = (60/args.tempo) * args.melody
-
     if args.key is None:
         args.key = key_midi
 
@@ -89,19 +87,24 @@ def main(args):
             print(f"MIDI Port: {args.midi_port}")
         print()
     
-    major_scale = [midi_to_note(args.key + i) for i in [0, 2, 4, 5, 7, 9, 11]]
+    major_scale = [midi_to_note(i) for i in major_scale_midi]
 
-    t = np.linspace(0, beat_duration * 4, int(samplerate * beat_duration * 4), endpoint=False)
+    beat_duration = lambda m: (60/args.tempo) * m * 4
 
     melody = []
     bass = []
     harmony = []
     drums = []
     is_chorus = False
+    m = args.melody if not args.rhythm else (1/(2**random.randint(0, 4)))
+    print(f"{m} notes")
     for label in song_struct:
         if label == "/": 
             is_chorus = True
+            if args.rhythm: m =  (1/(2**random.randint(0, 4))); print(f"{m} notes")
             continue
+
+        t = np.linspace(0, beat_duration(m), int(samplerate * beat_duration(m)), endpoint=False)
 
         chord_scales = []
         for i in chords_by_label[label].split('-'):
@@ -116,11 +119,11 @@ def main(args):
             s = random.choice(chord_scale) if random.random() < 0.8 else random.choice(major_scale)
             y.append(s)
 
-        if args.verbose:
-            print(f"{label} Chord Scales: ")
-            for tempo, notes in chord_scales:
-                print(f"   {tempo}: {[note for note, _, _, _ in notes]}")
-            print(f"{label} Melody: {[n for n,_,_,_ in y]}")
+        #if args.verbose:
+        #    print(f"{label} Chord Scales: ")
+        #    for tempo, notes in chord_scales:
+        #        print(f"   {tempo}: {[note for note, _, _, _ in notes]}")
+        #    print(f"{label} Melody: {[n for n,_,_,_ in y]}")
 
         wave = np.concatenate([generate_sawtooth(f, t) for _, _, f, _ in y])
         melody.append(wave)
