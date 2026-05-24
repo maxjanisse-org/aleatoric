@@ -78,16 +78,18 @@ def get_note_duration(note_type, bpm):
     seconds_per_beat = 60.0 / bpm
     return seconds_per_beat * beat_multipliers[note_type]
 
+def generate_midi_msgs(wave, values, channel, xx):
+    tempo = mido.bpm2tempo(args.tempo)
+    delta = mido.second2tick(get_note_duration(xx, args.tempo), 480, tempo)
+    for m,v in values:
+        wave.append(mido.Message("note_on", note=m, velocity=v[0], channel=channel, time=0))
+        wave.append(mido.Message("note_off", note=m, velocity=v[1], channel=channel, time=delta))
+
 def main(args):
     samplerate = 48000
     song_struct = song_structs[random.randint(0, len(song_structs)-1)]
     chords = random.sample(chord_loops, k=4)
     chords_by_label = {c[0]: c[1] for c in zip(['A','B','C','D'], chords)}
-
-    key_midi = random.randint(57, 69) # A3 to A4
-
-    if args.key is None:
-        args.key = key_midi
 
     note, octave, _, _ = midi_to_note(args.key)
     major_scale_midi = [args.key + i for i in [0, 2, 4, 5, 7, 9, 11]]
@@ -99,38 +101,31 @@ def main(args):
         for k,v in chords_by_label.items():
             print(f"    {k}: {v}")
         print(f"Tempo: {args.tempo} bpm")
-        print(f"Output: {args.output if args.output is not None else "Audio Out"}")
+        if not args.midi:
+            print(f"Output: {args.output if args.output is not None else "Audio Out"}")
+        else:
+            print(f"Output: MIDI")
+            print(f"    Device: '{args.midi_device}'")
         print(f"Generate Bass: {args.bass}")
         print(f"Generate Harmony: {args.harmony}")
         print(f"Generate Rhythm: {args.rhythm}")
         print(f"Generate Drums: {args.drums}")
-        print(f"MIDI Support: {args.midi}")
-        if args.midi:
-            print(f"    Device: '{args.midi_device}'")
         print()
     
     major_scale = [midi_to_note(i) for i in major_scale_midi]
-
-    beat_duration = lambda m: (60/args.tempo) * m * 4
 
     melody = []
     bass = []
     harmony = []
     drums = []
-    is_chorus = False
-    e = get_note_duration(args.melody, args.tempo) if not args.rhythm else (1/(2**random.randint(0, 4)))
     xx = args.melody if not args.rhythm else random.choice(note_types)
-    print(f"Verse {e} notes")
     for label in song_struct:
-        if label == "/": 
-            is_chorus = True
-            if args.rhythm: 
-                e =  (1/(2**random.randint(0, 4)))
+        if label == "/":
+            if args.rhythm:
                 xx = random.choice(note_types)
-                print(f"Chorus {e} notes")
             continue
 
-        t = np.linspace(0, beat_duration(e), int(samplerate * beat_duration(e)), endpoint=False)
+        t = np.linspace(0, get_note_duration(xx, args.tempo), int(samplerate * get_note_duration(xx, args.tempo)), endpoint=False)
 
         chord_scales = []
         for i in chords_by_label[label].split('-'):
@@ -145,63 +140,55 @@ def main(args):
             s = random.choice(chord_scale) if random.random() < 0.8 else random.choice(major_scale)
             y.append(s)
 
-        #if args.verbose:
-        #    print(f"{label} Chord Scales: ")
-        #    for tempo, notes in chord_scales:
-        #        print(f"   {tempo}: {[note for note, _, _, _ in notes]}")
-        #    print(f"{label} Melody: {[n for n,_,_,_ in y]}")
-
         wave = []
         if args.midi:
-            tempo = mido.bpm2tempo(args.tempo)
-            delta = mido.second2tick(get_note_duration(xx, args.tempo), 480, tempo)
-            for _,_,_,m in y*4:
-                wave.append(mido.Message("note_on", note=m, velocity=64, channel=0, time=0))
-                wave.append(mido.Message("note_off", note=m, velocity=64, channel=0, time=delta))
+            values = []
+            for _,_,_,n in y*2:
+                values.append((n, [64]*2))
+            generate_midi_msgs(wave, values, 0, xx)
         else:
             wave = np.concatenate([generate_sawtooth(f, t) for _, _, f, _ in y])
 
         melody.append(wave)
 
-        #if args.drums:
-        #    wave = np.concatenate([generate_sawtooth(f, t) for f in [50]*4])
-        #    drums.append(wave)
-
-        if args.harmony:
-            m = [0]*4
-            if not is_chorus:
-                arg = 3 if args.midi else 2
-                m = [notes[0][arg] for _, notes in chord_scales]
-            #n = [notes[0][2] for _, notes in chord_scales] if is_chorus else [0]*4
+        if args.drums:
             wave = []
             if args.midi:
-                tempo = mido.bpm2tempo(args.tempo)
-                delta = mido.second2tick(get_note_duration(args.melody, args.tempo), 480, tempo)
-                for n in m*4:
-                    wave.append(mido.Message("note_on", note=n, velocity=64, channel=1, time=0))
-                    wave.append(mido.Message("note_off", note=n, velocity=64, channel=1, time=delta))
+                values = []
+                for n in [39]*16:
+                    values.append((n, [100,0]))
+                generate_midi_msgs(wave, values, 9, "eighth")                
+                drums.append(wave)
+
+        if args.harmony:
+            arg = 3 if args.midi else 2
+            n = [notes[0][arg] for _, notes in chord_scales]
+            wave = []
+            if args.midi:
+                values = []
+                for m in n*2:
+                    values.append((m, [64]*2))
+                generate_midi_msgs(wave, values, 1, args.melody)
             if not args.midi:
-                wave = np.concatenate([generate_sawtooth(f, t) for f in m])
-            
+                wave = np.concatenate([generate_sawtooth(f, t) for f in n])
+
             harmony.append(wave)
 
         if args.bass:
             _, _, _, midi = y[0]
-            note, oct, m, midi = midi_to_note(midi - 24)
+            note, oct, n, midi = midi_to_note(midi - 24)
             if args.verbose:
-                print(f"{label} Bass Note: {note}{oct} @ {m}Hz ({midi})")
+                print(f"{label} Bass Note: {note}{oct} @ {n}Hz ({midi})")
             
             wave = []
             if args.midi:
-                tempo = mido.bpm2tempo(args.tempo)
-                delta = mido.second2tick(get_note_duration('whole', args.tempo), 480, tempo)
-                for n in [midi]*2:
-                    wave.append(mido.Message("note_on", note=n, velocity=64, channel=2, time=0))
-                    wave.append(mido.Message("note_off", note=n, velocity=64, channel=2, time=delta))
+                values = []
+                for m in [midi]*2:
+                    values.append((m, [64]*2))
+                generate_midi_msgs(wave, values, 2, "whole")
             if not args.midi:
-                e = 1
-                s = np.linspace(0, beat_duration(e), int(samplerate * beat_duration(e)), endpoint=False)
-                wave = np.concatenate([generate_sawtooth(f, s) for f in [m]*4])
+                s = np.linspace(0, get_note_duration('whole', args.tempo), int(samplerate * get_note_duration('whole', args.tempo)), endpoint=False)
+                wave = np.concatenate([generate_sawtooth(f, s) for f in [n]*4])
 
             bass.append(wave)
 
@@ -211,7 +198,6 @@ def main(args):
         mid = mido.MidiFile()
         mid.tracks.append(mido.merge_tracks(x))
 
-        #port = mido.open_output(name=args.midi_device)
         with mido.open_output(name=args.midi_device) as port:
             try:
                 for msg in mid.play():
@@ -311,6 +297,11 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
+    key_midi = random.randint(57, 69) # A3 to A4
+
+    if args.key is None:
+        args.key = key_midi
 
     if args.tempo is None:
         args.tempo = random.randint(80, 160)
