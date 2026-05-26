@@ -9,7 +9,7 @@ song_structs = [
     "AABB/CC", 
     "ABAB/CD", 
     "AB/CDDD"
-] # Can add more, possibly as an argument (waaaaay extra credit)
+]
 
 chord_loops = [
     "I-IV-ii-V",
@@ -85,8 +85,36 @@ def generate_midi_msgs(wave, values, channel, xx):
         wave.append(mido.Message("note_on", note=m, velocity=v[0], channel=channel, time=0))
         wave.append(mido.Message("note_off", note=m, velocity=v[1], channel=channel, time=delta))
 
+def determine_chord_scales(chords_by_label, major_scale_midi):     
+    major_scale = [midi_to_note(i) for i in major_scale_midi]   
+    chord_scales = []
+
+    g = {}
+    for line, chords in chords_by_label.items():
+        g[line] = []
+        for i in chords.split('-'):
+            x = list(parse_progression(i))[0]
+            w = (x + 2) % len(major_scale_midi)
+            u = (x + 4) % len(major_scale_midi)
+            a = [midi_to_note(major_scale_midi[j]) for j in [x, w, u]]
+            chord_scales.append((i, a)) 
+
+            s = random.choice(a) if random.random() < 0.8 else random.choice(major_scale)
+            g[line].append(s)
+
+    y = []
+    for _, chord_scale in chord_scales:
+        s = random.choice(chord_scale) if random.random() < 0.8 else random.choice(major_scale)
+        y.append(s)
+
+    return (chord_scales, y, g)
+
+def determine_amplitude(db):
+    return 10 ** (db / 20)
+
 def main(args):
     samplerate = 48000
+    amplitude = determine_amplitude(args.volume)
     song_struct = song_structs[random.randint(0, len(song_structs)-1)]
     chords = random.sample(chord_loops, k=4)
     chords_by_label = {c[0]: c[1] for c in zip(['A','B','C','D'], chords)}
@@ -94,12 +122,17 @@ def main(args):
     note, octave, _, _ = midi_to_note(args.key)
     major_scale_midi = [args.key + i for i in [0, 2, 4, 5, 7, 9, 11]]
 
+    (chord_scales, y, g) = determine_chord_scales(chords_by_label, major_scale_midi)
+
     if args.verbose:
         print(f"Key: {note}{octave} ({args.key})")
         print(f"Major Scale Notes: {[midi_to_note(i)[0] for i in major_scale_midi]}")
         print(f"Structure: {song_struct}")
         for k,v in chords_by_label.items():
             print(f"    {k}: {v}")
+        print(f"Structure: {song_struct}")
+        for k,v in g.items():
+            print(f"    {k}: {[d[0] for d in v]}")
         print(f"Tempo: {args.tempo} bpm")
         if not args.midi:
             print(f"Output: {args.output if args.output is not None else "Audio Out"}")
@@ -112,8 +145,6 @@ def main(args):
         print(f"Generate Drums: {args.drums}")
         print()
     
-    major_scale = [midi_to_note(i) for i in major_scale_midi]
-
     melody = []
     bass = []
     harmony = []
@@ -126,19 +157,6 @@ def main(args):
             continue
 
         t = np.linspace(0, get_note_duration(xx, args.tempo), int(samplerate * get_note_duration(xx, args.tempo)), endpoint=False)
-
-        chord_scales = []
-        for i in chords_by_label[label].split('-'):
-            x = list(parse_progression(i))[0]
-            w = (x + 2) % len(major_scale_midi)
-            u = (x + 4) % len(major_scale_midi)
-            a = [midi_to_note(major_scale_midi[j]) for j in [x, w, u]]
-            chord_scales.append((i, a)) 
-
-        y = []
-        for _, chord_scale in chord_scales:
-            s = random.choice(chord_scale) if random.random() < 0.8 else random.choice(major_scale)
-            y.append(s)
 
         wave = []
         if args.midi:
@@ -157,25 +175,25 @@ def main(args):
                 values = []
                 for n in [39]*16:
                     values.append((n, [100,0]))
-                generate_midi_msgs(wave, values, 9, "eighth")                
+                generate_midi_msgs(wave, values, 9, "eighth")
                 drums.append(wave)
 
         if args.harmony:
             arg = 3 if args.midi else 2
-            n = [notes[0][arg] for _, notes in chord_scales]
+            n = [note[arg] for note in g[label]] * 4
             wave = []
             if args.midi:
                 values = []
-                for m in n*2:
+                for m in n:
                     values.append((m, [64]*2))
                 generate_midi_msgs(wave, values, 1, args.melody)
-            if not args.midi:
+            else:
                 wave = np.concatenate([generate_sawtooth(f, t) for f in n])
 
             harmony.append(wave)
 
         if args.bass:
-            _, _, _, midi = y[0]
+            _, _, _, midi = g[label][0]
             note, oct, n, midi = midi_to_note(midi - 24)
             if args.verbose:
                 print(f"{label} Bass Note: {note}{oct} @ {n}Hz ({midi})")
@@ -186,9 +204,8 @@ def main(args):
                 for m in [midi]*2:
                     values.append((m, [64]*2))
                 generate_midi_msgs(wave, values, 2, "whole")
-            if not args.midi:
-                s = np.linspace(0, get_note_duration('whole', args.tempo), int(samplerate * get_note_duration('whole', args.tempo)), endpoint=False)
-                wave = np.concatenate([generate_sawtooth(f, s) for f in [n]*4])
+            else:
+                wave = np.concatenate([generate_sawtooth(f, t) for f in [n]*16])
 
             bass.append(wave)
 
@@ -206,16 +223,13 @@ def main(args):
                 port.send(mido.Message('control_change', channel=0, control=123, value=0))
             finally:
                 port.close()
-
     else:
-        s = min([len(a) for a in x])
-        for a in x:
-            a.resize(s, refcheck=False)
-
         t = np.zeros_like(x[0])
         for y in x:
             t += y.astype(np.float32)
-        x = t / 2.0
+        x = t / len(x)
+
+        x *= (amplitude / (np.max(np.abs(x))))
 
         if args.output is None:
             print("Playing music...")
@@ -294,6 +308,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--midi-devices", action="store_true",
         help=""
+    )
+    parser.add_argument(
+        "--volume", type=int, default=-3,
+        help="adjust the volume in decibels (dB). Default is -3dB."
     )
 
     args = parser.parse_args()
