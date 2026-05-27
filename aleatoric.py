@@ -6,8 +6,8 @@ import argparse
 import random
 
 song_structs = [
-    "AABB/CC", 
-    "ABAB/CD", 
+    "AABB/CC",
+    "ABAB/CD",
     "AB/CDDD"
 ]
 
@@ -47,7 +47,7 @@ def parse_progression(progression):
             case 'vi': yield 5
             case _: raise ValueError(f"unexpected progression '{p}'")
 
-def generate_sawtooth(f, t, harmonics=50):    
+def generate_sawtooth(f, t, harmonics=50):
     sawtooth_fourier = np.zeros_like(t)
 
     for k in range(1, harmonics + 1):
@@ -59,7 +59,7 @@ def generate_sawtooth(f, t, harmonics=50):
 def get_note_duration(note_type, bpm):
     """
     Calculates the duration of a note in seconds.
-    
+
     note_type: 'whole', 'half', 'quarter', 'eighth', 'sixteenth'
     bpm: beats per minute (assuming 4/4 time)
     """
@@ -71,31 +71,34 @@ def get_note_duration(note_type, bpm):
         'eighth': 0.5,
         'sixteenth': 0.25
     }
-    
+
     if note_type not in beat_multipliers:
         raise ValueError(f"Unknown note type: {note_type}")
-        
+
     seconds_per_beat = 60.0 / bpm
     return seconds_per_beat * beat_multipliers[note_type]
 
-def generate_midi_msgs(wave, values, channel, xx):
-    tempo = mido.bpm2tempo(args.tempo)
-    delta = mido.second2tick(get_note_duration(xx, args.tempo), 480, tempo)
+def generate_midi_msgs(wave, values, channel, note_type):
+    tick_durations = {
+        "whole": 1920,
+        "half": 960,
+        "quarter": 480,
+        "eighth": 240,
+        "sixteenth": 120
+    }
     for m,v in values:
         wave.append(mido.Message("note_on", note=m, velocity=v[0], channel=channel, time=0))
-        wave.append(mido.Message("note_off", note=m, velocity=v[1], channel=channel, time=delta))
+        wave.append(mido.Message("note_off", note=m, velocity=v[1], channel=channel, time=tick_durations[note_type]))
 
-def determine_chord_scales(chords_by_label, major_scale_midi):     
-    major_scale = [midi_to_note(i) for i in major_scale_midi]
-
+def determine_chord_scales(chords_by_label, major_scale):
     g = {}
     for line, chords in chords_by_label.items():
         g[line] = []
         for i in chords.split('-'):
             x = list(parse_progression(i))[0]
-            w = (x + 2) % len(major_scale_midi)
-            u = (x + 4) % len(major_scale_midi)
-            a = [midi_to_note(major_scale_midi[j]) for j in [x, w, u]]
+            w = (x + 2) % len(major_scale)
+            u = (x + 4) % len(major_scale)
+            a = [major_scale[j] for j in [x, w, u]]
 
             s = random.choice(a) if random.random() < 0.8 else random.choice(major_scale)
             g[line].append(s)
@@ -113,8 +116,9 @@ def main(args):
 
     note, octave, _, _ = midi_to_note(args.key)
     major_scale_midi = [args.key + i for i in [0, 2, 4, 5, 7, 9, 11]]
+    major_scale = [midi_to_note(i) for i in major_scale_midi]
 
-    chord_scales_by_label = determine_chord_scales(chords_by_label, major_scale_midi)
+    chord_scales_by_label = determine_chord_scales(chords_by_label, major_scale)
 
     note_type = args.melody if not args.rhythm else random.choice(note_types)
     chorus_note_type = random.choice(note_types)
@@ -144,7 +148,7 @@ def main(args):
             print(f"    Chorus: {chorus_note_type.title()} notes")
         print(f"Generate Drums: {args.drums}")
         print()
-    
+
     melody = []
     bass = []
     harmony = []
@@ -156,7 +160,12 @@ def main(args):
                 note_type = chorus_note_type
             continue
 
-        t = np.linspace(0, get_note_duration(note_type, args.tempo), int(samplerate * get_note_duration(note_type, args.tempo)), endpoint=False)
+        t = np.linspace(
+            0,
+            get_note_duration(note_type, args.tempo),
+            int(samplerate * get_note_duration(note_type, args.tempo)),
+            endpoint=False
+        ) if not args.midi else None
 
         wave = []
         n = chord_scales_by_label[label] * 2
@@ -170,21 +179,23 @@ def main(args):
 
         if args.drums:
             wave = []
-            n = [midi_to_note(39)] * 8
+            n = [midi_to_note(39)] * 16
             if args.midi:
                 values = [(i, [100,0]) for i in [midi for _,_,_,midi in n]]
                 generate_midi_msgs(wave, values, 9, "eighth")
             else:
                 wave = np.concatenate([generate_sawtooth(f, t) for _,_,f,_ in n])
+
             drums.append(wave)
 
         if args.harmony:
             arg = 3 if args.midi else 2
-            n = [note[arg] for note in chord_scales_by_label[label]] * 2
+            n = [major_scale[0][arg]] * 8
             wave = []
             if args.midi:
                 values = [(m, [64,64]) for m in n]
                 generate_midi_msgs(wave, values, 1, args.melody)
+                generate_midi_msgs(wave, values, 1, note_type)
             else:
                 wave = np.concatenate([generate_sawtooth(f, t) for f in n])
 
@@ -195,9 +206,10 @@ def main(args):
             note, oct, freq, midi = midi_to_note(midi - 24)
             if args.verbose:
                 print(f"{label} Bass Note: {note}{oct} @ {freq}Hz ({midi})")
-            
+
             wave = []
             if args.midi:
+                values = [(midi, [64,64])]
                 values = [(m, [64,64]) for m in [midi]*8]
                 generate_midi_msgs(wave, values, 2, "whole")
             else:
@@ -213,8 +225,10 @@ def main(args):
 
         with mido.open_output(name=args.midi_device) as port:
             try:
-                for msg in mid.play():
-                    port.send(msg)
+                while True:
+                    for msg in mid.play():
+                        port.send(msg)
+                    print("Loop complete")
             except KeyboardInterrupt:
                 port.send(mido.Message('control_change', channel=0, control=123, value=0))
             finally:
@@ -230,7 +244,9 @@ def main(args):
         if args.output is None:
             print("Playing music...")
             try:
-                sd.play(mixed_track, samplerate, loop=True, blocking=True)
+                while True:
+                    sd.play(mixed_track, samplerate, blocking=True)
+                    print("Loop complete")
             except KeyboardInterrupt:
                 print("\nPlayback complete, exiting...")
         else:
@@ -256,7 +272,7 @@ def key(value):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Program that procedurally generates Aleatoric music.")
     parser.add_argument(
-        "-v", "--verbose", action="store_true", 
+        "-v", "--verbose", action="store_true",
         help="enable the program to have more detailed output."
     )
     parser.add_argument(
@@ -265,7 +281,7 @@ if __name__ == "__main__":
         metavar="FILENAME.wav"
     )
     parser.add_argument(
-        "-k", "--key", type=key, 
+        "-k", "--key", type=key,
         help="set the key of the generated music in the form of a MIDI key. By default, this will be randomly selected."
     )
     parser.add_argument(
