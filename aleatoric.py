@@ -86,9 +86,9 @@ def generate_midi_msgs(wave, values, channel, note_type):
         "eighth": 240,
         "sixteenth": 120
     }
-    for m,v in values:
-        wave.append(mido.Message("note_on", note=m, velocity=v[0], channel=channel, time=0))
-        wave.append(mido.Message("note_off", note=m, velocity=v[1], channel=channel, time=tick_durations[note_type]))
+    for m,[v_on, v_off] in values:
+        wave.append(mido.Message("note_on", note=m, velocity=v_on, channel=channel, time=0))
+        wave.append(mido.Message("note_off", note=m, velocity=v_off, channel=channel, time=tick_durations[note_type]))
 
 def determine_chord_scales(chords_by_label, major_scale):
     g = {}
@@ -168,7 +168,7 @@ def main(args):
         ) if not args.midi else None
 
         wave = []
-        n = chord_scales_by_label[label] * 2
+        n = chord_scales_by_label[label] * 4
         if args.midi:
             values = [(midi, [64,64]) for _,_,_,midi in n]
             generate_midi_msgs(wave, values, 0, note_type)
@@ -179,18 +179,18 @@ def main(args):
 
         if args.drums:
             wave = []
-            n = [midi_to_note(39)] * 16
+            n = [midi_to_note(35)] * 16
             if args.midi:
                 values = [(i, [100,0]) for i in [midi for _,_,_,midi in n]]
                 generate_midi_msgs(wave, values, 9, "eighth")
             else:
-                wave = np.concatenate([generate_sawtooth(f, t) for _,_,f,_ in n])
+                raise ValueError("Not Implemented")
 
             drums.append(wave)
 
         if args.harmony:
             arg = 3 if args.midi else 2
-            n = [major_scale[0][arg]] * 8
+            n = [major_scale[0][arg]] * 16
             wave = []
             if args.midi:
                 values = [(m, [64,64]) for m in n]
@@ -209,11 +209,11 @@ def main(args):
 
             wave = []
             if args.midi:
-                values = [(midi, [64,64])]
+                values = [(midi, [64,64])] * 2
                 values = [(m, [64,64]) for m in [midi]*8]
                 generate_midi_msgs(wave, values, 2, "whole")
             else:
-                wave = np.concatenate([generate_sawtooth(f, t) for f in [freq]*8])
+                wave = np.concatenate([generate_sawtooth(f, t) for f in [freq]]*16)
 
             bass.append(wave)
 
@@ -244,9 +244,7 @@ def main(args):
         if args.output is None:
             print("Playing music...")
             try:
-                while True:
-                    sd.play(mixed_track, samplerate, blocking=True)
-                    print("Loop complete")
+                sd.play(mixed_track, samplerate, loop=True, blocking=True)
             except KeyboardInterrupt:
                 print("\nPlayback complete, exiting...")
         else:
