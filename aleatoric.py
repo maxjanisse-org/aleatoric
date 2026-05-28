@@ -317,7 +317,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--midi-devices", action="store_true",
-        help=""
+        help="list available MIDI input devices to connect to and exit the program. Use associated number as argument to `--midi-port` to select device."
     )
     parser.add_argument(
         "--volume", type=int, default=-3,
