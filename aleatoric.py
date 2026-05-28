@@ -26,7 +26,13 @@ chord_loops = [
 
 notes = ['C', 'D♭/C♯', 'D', 'E♭/D♯', 'E', 'F', 'G♭/F♯', 'G', 'A♭/G♯', 'A', 'B♭/A♯', 'B']
 
-note_types = ['whole', 'half', 'quarter', 'eighth', 'sixteenth']
+note_durations = {
+    "whole": (1920, 4.0),
+    "half": (960, 2.0),
+    "quarter": (480, 1.0),
+    "eighth": (240, 0.5),
+    "sixteenth": (120, 0.25)
+}
 
 def midi_to_note(midi):
     note_idx = midi % 12
@@ -63,14 +69,7 @@ def get_note_duration(note_type, bpm):
     note_type: 'whole', 'half', 'quarter', 'eighth', 'sixteenth'
     bpm: beats per minute (assuming 4/4 time)
     """
-    # Number of quarter-note beats each note type receives
-    beat_multipliers = {
-        'whole': 4.0,
-        'half': 2.0,
-        'quarter': 1.0,
-        'eighth': 0.5,
-        'sixteenth': 0.25
-    }
+    beat_multipliers = { k: multiplier for k, [_, multiplier] in note_durations.items() }
 
     if note_type not in beat_multipliers:
         raise ValueError(f"Unknown note type: {note_type}")
@@ -79,13 +78,7 @@ def get_note_duration(note_type, bpm):
     return seconds_per_beat * beat_multipliers[note_type]
 
 def generate_midi_msgs(wave, values, channel, note_type):
-    tick_durations = {
-        "whole": 1920,
-        "half": 960,
-        "quarter": 480,
-        "eighth": 240,
-        "sixteenth": 120
-    }
+    tick_durations = {k: ticks for k, [ticks, _] in note_durations.items()}
     for m,[v_on, v_off] in values:
         wave.append(mido.Message("note_on", note=m, velocity=v_on, channel=channel, time=0))
         wave.append(mido.Message("note_off", note=m, velocity=v_off, channel=channel, time=tick_durations[note_type]))
@@ -120,6 +113,7 @@ def main(args):
 
     chord_scales_by_label = determine_chord_scales(chords_by_label, major_scale)
 
+    note_types = list(note_durations.keys())
     note_type = args.melody if not args.rhythm else random.choice(note_types)
     chorus_note_type = random.choice(note_types)
 
@@ -128,10 +122,7 @@ def main(args):
         print(f"Major Scale Notes: {[midi_to_note(i)[0] for i in major_scale_midi]}")
         print(f"Structure: {song_struct}")
         for k,v in chords_by_label.items():
-            print(f"    {k}: {v}")
-        print(f"Structure: {song_struct}")
-        for k,v in chord_scales_by_label.items():
-            print(f"    {k}: {[d[0] for d in v]}")
+            print(f"    {k}: {v:^11} -> {[d[0] for d in chord_scales_by_label[k]]}")
         print(f"Tempo: {args.tempo} bpm")
         if not args.rhythm:
             print(f"Note Type: {note_type.title()} notes")
@@ -287,7 +278,7 @@ if __name__ == "__main__":
         help="set the tempo of the generated music. Value must be between 80 and 160. By default, this will be randomly chosen."
     )
     parser.add_argument(
-        "-m", "--melody", type=str, default="eighth", choices=note_types,
+        "-m", "--melody", type=str, default="eighth", choices=note_durations.keys(),
         help="By default, eighth-notes will be used."
     )
     # Extras
