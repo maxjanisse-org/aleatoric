@@ -101,7 +101,7 @@ def determine_amplitude(db): return 10 ** (db / 20)
 def main(args):
     samplerate = 48000
 
-    amplitude = determine_amplitude(args.volume)
+    amplitude = determine_amplitude(args.volume) * np.iinfo(np.int16).max
     song_struct = song_structs[random.randint(0, len(song_structs)-1)]
     chords = random.sample(chord_loops, k=4)
     chords_by_label = {c[0]: c[1] for c in zip(['A','B','C','D'], chords)}
@@ -247,7 +247,7 @@ def main(args):
     else:
         mixed_track = np.zeros_like(tracks[0])
         for track in tracks:
-            mixed_track += track.astype(np.float32)
+            mixed_track += track.astype(np.float16)
         mixed_track /= len(tracks)
 
         mixed_track *= (amplitude / (np.max(np.abs(mixed_track))))
@@ -260,7 +260,7 @@ def main(args):
                 print("\nPlayback complete, exiting...")
         else:
             print(f"Writing to file: {args.output}")
-            wav.write(args.output, samplerate, tracks)
+            wav.write(args.output, samplerate, mixed_track.astype(np.int16))
 
 def tempo(value):
     try:
