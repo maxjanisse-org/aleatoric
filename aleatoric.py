@@ -1,3 +1,5 @@
+# Max Janisse (c) 2026
+# <mjanisse@pdx.edu>
 import scipy.io.wavfile as wav
 import numpy as np
 import sounddevice as sd
