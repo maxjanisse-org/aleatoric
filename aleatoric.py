@@ -27,11 +27,11 @@ chord_loops = [
 notes = ['C', 'D♭/C♯', 'D', 'E♭/D♯', 'E', 'F', 'G♭/F♯', 'G', 'A♭/G♯', 'A', 'B♭/A♯', 'B']
 
 note_durations = {
-    "whole": (1920, 4.0),
-    "half": (960, 2.0),
-    "quarter": (480, 1.0),
-    "eighth": (240, 0.5),
-    "sixteenth": (120, 0.25)
+    "whole": (1920, 4.0, 1),
+    "half": (960, 2.0, 2),
+    "quarter": (480, 1.0, 4),
+    "eighth": (240, 0.5, 8),
+    "sixteenth": (120, 0.25, 16)
 }
 
 def midi_to_note(midi):
@@ -69,7 +69,7 @@ def get_note_duration(note_type, bpm):
     note_type: 'whole', 'half', 'quarter', 'eighth', 'sixteenth'
     bpm: beats per minute (assuming 4/4 time)
     """
-    beat_multipliers = { k: multiplier for k, [_, multiplier] in note_durations.items() }
+    beat_multipliers = { k: multiplier for k, [_, multiplier, _] in note_durations.items() }
 
     if note_type not in beat_multipliers:
         raise ValueError(f"Unknown note type: {note_type}")
@@ -78,7 +78,7 @@ def get_note_duration(note_type, bpm):
     return seconds_per_beat * beat_multipliers[note_type]
 
 def generate_midi_msgs(wave, values, channel, note_type):
-    tick_durations = {k: ticks for k, [ticks, _] in note_durations.items()}
+    tick_durations = {k: ticks for k, [ticks, _, _] in note_durations.items()}
     for m,[v_on, v_off] in values:
         wave.append(mido.Message("note_on", note=m, velocity=v_on, channel=channel, time=0))
         wave.append(mido.Message("note_off", note=m, velocity=v_off, channel=channel, time=tick_durations[note_type]))
@@ -93,15 +93,14 @@ def determine_chord_scales(chords_by_label, major_scale):
             u = (x + 4) % len(major_scale)
             a = [major_scale[j] for j in [x, w, u]]
 
-            s = random.choice(a) if random.random() < 0.8 else random.choice(major_scale)
-            g[line].append(s)
-
+            g[line].append(a)
     return g
 
 def determine_amplitude(db): return 10 ** (db / 20)
 
 def main(args):
     samplerate = 48000
+
     amplitude = determine_amplitude(args.volume)
     song_struct = song_structs[random.randint(0, len(song_structs)-1)]
     chords = random.sample(chord_loops, k=4)
@@ -111,11 +110,11 @@ def main(args):
     major_scale_midi = [args.key + i for i in [0, 2, 4, 5, 7, 9, 11]]
     major_scale = [midi_to_note(i) for i in major_scale_midi]
 
-    chord_scales_by_label = determine_chord_scales(chords_by_label, major_scale)
-
     note_types = list(note_durations.keys())
     note_type = args.melody if not args.rhythm else random.choice(note_types)
     chorus_note_type = random.choice(note_types)
+
+    chord_scales_by_label = determine_chord_scales(chords_by_label, major_scale)
 
     if args.verbose:
         print(f"Key: {note}{octave} ({args.key})")
@@ -140,10 +139,18 @@ def main(args):
         print(f"Generate Drums: {args.drums}")
         print()
 
+    chord_scale_note = np.linspace(
+        0,
+        get_note_duration("whole", args.tempo),
+        int(samplerate * get_note_duration("whole", args.tempo)),
+        endpoint=False
+    )
+    
     melody = []
     bass = []
     harmony = []
     drums = []
+    line_cache = {}
     print("Generating music...")
     for label in song_struct:
         if label == "/":
@@ -159,20 +166,35 @@ def main(args):
         ) if not args.midi else None
 
         wave = []
-        n = chord_scales_by_label[label] * 4
+        chord_scales = chord_scales_by_label[label]
+        note_type_count = note_durations[note_type][2]
+        line_notes, harmony_notes = ([], []) if label not in line_cache else line_cache[label]
+        if not line_notes and not harmony_notes:
+            for chord_scale in chord_scales:
+                for _ in range(note_type_count):
+                    use_chord_note = random.random() < 0.8
+                    chord_scale_note = random.choice(chord_scale)
+
+                    line_notes.append(chord_scale_note if use_chord_note else random.choice(major_scale))
+
+                    if args.harmony:
+                        harmony_notes.append(chord_scale[0])
         if args.midi:
-            values = [(midi, [64,64]) for _,_,_,midi in n]
+            values = [(midi, [64,64]) for _,_,_,midi in line_notes]
             generate_midi_msgs(wave, values, 0, note_type)
         else:
-            wave = np.concatenate([generate_sawtooth(f, t) for _,_,f,_ in n])
+            wave = np.concatenate([generate_sawtooth(f, t) for _,_,f,_ in line_notes])
 
         melody.append(wave)
 
+        if label not in line_cache:
+            line_cache[label] = (line_notes, harmony_notes)
+
         if args.drums:
             wave = []
-            n = [midi_to_note(35)] * 16
+            n = [midi_to_note(35)] * 32
             if args.midi:
-                values = [(i, [100,0]) for i in [midi for _,_,_,midi in n]]
+                values = [(i, [100,100]) for i in [midi for _,_,_,midi in n]]
                 generate_midi_msgs(wave, values, 9, "eighth")
             else:
                 raise ValueError("Not Implemented")
@@ -181,31 +203,29 @@ def main(args):
 
         if args.harmony:
             arg = 3 if args.midi else 2
-            n = [major_scale[0][arg]] * 16
+            n = [y[arg] for y in harmony_notes]
             wave = []
             if args.midi:
                 values = [(m, [64,64]) for m in n]
-                generate_midi_msgs(wave, values, 1, args.melody)
+                print("harmony: ", len(values))
                 generate_midi_msgs(wave, values, 1, note_type)
             else:
                 wave = np.concatenate([generate_sawtooth(f, t) for f in n])
-
             harmony.append(wave)
 
         if args.bass:
-            _, _, _, midi = chord_scales_by_label[label][0]
-            note, oct, freq, midi = midi_to_note(midi - 24)
+            arg = 3 if args.midi else 2
+            _, _, _, midi = line_notes[0]
+            bass_note = midi_to_note(midi - 24)
             if args.verbose:
-                print(f"{label} Bass Note: {note}{oct} @ {freq}Hz ({midi})")
+                print(f"{label} Bass Note: {bass_note[0]}{bass_note[1]} ({midi}) @ {bass_note[2]}Hz")
 
             wave = []
             if args.midi:
-                values = [(midi, [64,64])] * 2
-                values = [(m, [64,64]) for m in [midi]*8]
+                values = [(midi, [64,64])] * 4
                 generate_midi_msgs(wave, values, 2, "whole")
             else:
-                wave = np.concatenate([generate_sawtooth(f, t) for f in [freq]]*16)
-
+                wave = np.concatenate([generate_sawtooth(bass_note[arg], t)] * len(line_notes))
             bass.append(wave)
 
     tracks = [ np.concatenate(d) for d in [melody, bass, harmony, drums] if len(d) != 0]
